@@ -1,4 +1,4 @@
-// Key-X 核心：路径/常量、审计、AES-GCM 密库（与 Python 版逐字节互通的封装格式）、钥匙串、信任库
+// Key-X 核心：路径/常量、审计、AES-GCM 密库（封装格式 v1）、钥匙串、信任库
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
@@ -149,7 +149,7 @@ pub fn keychain_delete() {
     }
 }
 
-/// Python 版语义：有钥匙串后端即用。macOS Security 框架始终在（除显式 KEYX_MODE=password）；
+/// 平台语义：有钥匙串后端即用。macOS Security 框架始终在（除显式 KEYX_MODE=password）；
 /// 其他平台后端不可达（dbus 缺失等）视为不可用，回退主密码模式。
 pub fn keychain_available() -> bool {
     if std::env::var("KEYX_MODE").as_deref() == Ok("password") {
@@ -169,7 +169,7 @@ pub fn keychain_available() -> bool {
     }
 }
 
-// ───────────────────────── 密库（与 Python 版同一封装格式）─────────────────────────
+// ───────────────────────── 密库（封装格式 v1）─────────────────────────
 
 pub fn load_store() -> Result<Option<Value>, VaultError> {
     let p = vault_file();

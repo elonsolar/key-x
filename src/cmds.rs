@@ -1,4 +1,4 @@
-// CLI 命令实现（与 Python 版输出文本保持一致，测试按文本断言）
+// CLI 命令实现。输出文本是对外契约——测试按文本断言，改动需同步测试
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;

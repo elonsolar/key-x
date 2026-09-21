@@ -1,4 +1,4 @@
-// Key-X · 本机密钥引用系统（Rust 实现，与 Python 版密库格式互通）
+// Key-X · 本机密钥引用系统
 mod client;
 mod cmds;
 mod core;

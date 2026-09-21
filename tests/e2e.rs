@@ -1,4 +1,4 @@
-//! Key-X Rust 版端到端测试：移植自 Python 版 daemon-test.py（43 项断言）。
+//! Key-X Rust 版端到端测试（43 项断言）。
 //! 覆盖：token 鉴权、创建/解锁/错误密码、密文落盘、set/list、信任流程、run 注入、
 //!       scope 隔离、锁定/审计、导出导入、防篡改、解析链、peek、stop、钥匙串模式。
 
@@ -161,14 +161,14 @@ fn e2e() {
     );
     let out = cli(
         &proj,
-        &["run", "--env", &format!("DB_PASSWORD={}", kid2), "--", "python3", "-c", "import os;print(os.environ['DB_PASSWORD'],end='')"],
+        &["run", "--env", &format!("DB_PASSWORD={}", kid2), "--", "sh", "-c", "printf '%s' \"$DB_PASSWORD\""],
         Some("n\n"),
     );
     let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     check(&mut c, "未信任时 run 进入询问，输入 n 取消", out.status.code() == Some(1) && all.contains("已取消"), &all);
     let out = cli(
         &proj,
-        &["run", "--env", &format!("DB_PASSWORD={}", kid2), "--", "python3", "-c", "import os;print(os.environ['DB_PASSWORD'],end='')"],
+        &["run", "--env", &format!("DB_PASSWORD={}", kid2), "--", "sh", "-c", "printf '%s' \"$DB_PASSWORD\""],
         Some("y\n"),
     );
     check(
@@ -193,7 +193,7 @@ fn e2e() {
     std::fs::create_dir_all(&other).unwrap();
     let out = cli(
         &other,
-        &["run", "--env", &format!("PW={}", kid2), "--", "python3", "-c", "print(1)"],
+        &["run", "--env", &format!("PW={}", kid2), "--", "sh", "-c", "echo 1"],
         Some("n\n"),
     );
     check(&mut c, "其他项目首次访问走询问，拒绝后无法解析", out.status.code() == Some(1), &format!("st={:?}", out.status.code()));
@@ -261,7 +261,7 @@ fn e2e() {
     let _ = std::fs::remove_file(proj.join(".keyx.toml"));
     let out = cli(
         &proj,
-        &["run", "--env", &format!("OUT_PW={}", kid2), "--", "python3", "-c", "import os;print(os.environ['OUT_PW'],os.environ['ENV_PW'],end='')"],
+        &["run", "--env", &format!("OUT_PW={}", kid2), "--", "sh", "-c", "printf '%s %s' \"$OUT_PW\" \"$ENV_PW\""],
         None,
     );
     check(
@@ -271,7 +271,7 @@ fn e2e() {
         &format!("{:?}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
     );
     std::fs::write(proj.join(".keyx.toml"), format!("[env]\nENV_PW = \"{}\"\n", kid3)).unwrap();
-    let out = cli(&proj, &["run", "--", "python3", "-c", "import os;print(os.environ['ENV_PW'],end='')"], None);
+    let out = cli(&proj, &["run", "--", "sh", "-c", "printf '%s' \"$ENV_PW\""], None);
     check(
         &mut c,
         ".keyx.toml [env] 优先于 .env",
@@ -280,7 +280,7 @@ fn e2e() {
     );
     let out = cli(
         &proj,
-        &["run", "--env", &format!("ENV_PW={}", kid2), "--", "python3", "-c", "import os;print(os.environ['ENV_PW'],end='')"],
+        &["run", "--env", &format!("ENV_PW={}", kid2), "--", "sh", "-c", "printf '%s' \"$ENV_PW\""],
         None,
     );
     check(
@@ -289,7 +289,7 @@ fn e2e() {
         String::from_utf8_lossy(&out.stdout) == "New-Rotated-99!",
         &format!("{:?}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
     );
-    let out = cli(&other, &["run", "--", "python3", "-c", "print('passthrough',end='')"], None);
+    let out = cli(&other, &["run", "--", "sh", "-c", "printf passthrough"], None);
     check(
         &mut c,
         "无引用目录纯透传",
@@ -399,7 +399,7 @@ fn e2e() {
             check(&mut c, "密库文件不含主密钥", !has_key_field, "");
             let _ = kcli(&["trust", "add", &kid4], None);
             let out = kcli(
-                &["run", "--env", &format!("KC_PW={}", kid4), "--", "python3", "-c", "import os;print(os.environ['KC_PW'],end='')"],
+                &["run", "--env", &format!("KC_PW={}", kid4), "--", "sh", "-c", "printf '%s' \"$KC_PW\""],
                 None,
             );
             check(
