@@ -38,3 +38,4 @@ cargo build --release
 - Python 版 `keychain-reset` 无输出差异；Rust 版在无密钥时打印明确提示。
 - daemon 残留检测：Python 用 `os.kill(pid,0)`（僵尸进程误判），Rust 用端口探测（更准）。
 # key-x
+# key-x
