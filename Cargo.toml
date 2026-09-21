@@ -1,0 +1,29 @@
+[package]
+name = "keyx"
+version = "1.3.0"
+edition = "2021"
+description = "Key-X 本机密钥引用系统：密文密库 + kx_ 编号 + keyx run 环境变量注入"
+
+[dependencies]
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+tiny_http = "0.12"
+toml = "0.8"
+home = "0.5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rpassword = "7"
+ureq = "2"
+ctrlc = "3"
+
+[profile.dev.package."*"]
+opt-level = 2   # pbkdf2 等 crypto 依赖在纯 debug 下慢几个数量级
+
+[profile.release]
+strip = true
+lto = true

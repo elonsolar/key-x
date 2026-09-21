@@ -1,0 +1,49 @@
+# 五平台发布：tag 推送（v*）时在原生 runner 构建，产物自动挂到 GitHub Release
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04, target: aarch64-unknown-linux-gnu, cross: true }
+          - { os: windows-2022, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux arm64 交叉编译准备
+        if: matrix.cross
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
+      - name: 构建
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: 打包
+        shell: bash
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          if [ "${{ matrix.os }}" = "windows-2022" ]; then
+            zip -q "keyx-${{ matrix.target }}.zip" keyx.exe
+            cp "keyx-${{ matrix.target }}.zip" "$GITHUB_WORKSPACE/"
+          else
+            tar czf "keyx-${{ matrix.target }}.tar.gz" keyx
+            cp "keyx-${{ matrix.target }}.tar.gz" "$GITHUB_WORKSPACE/"
+          fi
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "keyx-*"
