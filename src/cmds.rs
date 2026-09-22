@@ -38,13 +38,25 @@ pub fn cmd_set(name: &str, username: Option<&str>, url: Option<&str>, notes: Opt
     println!("已保存。key-id: {}   （配置里写 {} 引用 {} 即可）", id, name, id);
 }
 
-pub fn cmd_list() {
+pub fn cmd_list(filter: Option<&str>) {
     ensure_daemon();
     ensure_unlocked();
-    let entries = api_or_die("GET", "/entries", None, T5)["entries"]
+    let mut entries = api_or_die("GET", "/entries", None, T5)["entries"]
         .as_array()
         .cloned()
         .unwrap_or_default();
+    // 按名称/用户名/备注子串过滤（不分大小写）：一个项目多条密码时按前缀归组查看
+    if let Some(f) = filter {
+        let f = f.to_lowercase();
+        entries.retain(|e| {
+            ["name", "username", "notes"].iter().any(|k| {
+                e.get(k)
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase().contains(&f))
+                    .unwrap_or(false)
+            })
+        });
+    }
     if entries.is_empty() {
         println!("（空）");
         return;

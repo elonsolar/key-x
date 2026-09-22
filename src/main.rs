@@ -73,7 +73,7 @@ fn main() {
                 None => usage(),
             }
         }
-        "list" => cmds::cmd_list(),
+        "list" => cmds::cmd_list(rest.first().map(String::as_str)),
         "peek" => match rest.first() {
             Some(k) => cmds::cmd_peek(k),
             None => usage(),
