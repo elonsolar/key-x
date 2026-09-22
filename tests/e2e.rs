@@ -149,6 +149,14 @@ fn e2e() {
     let out = cli(&proj, &["list"], None);
     let list_out = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     check(&mut c, "list 展示 key-id 不展示密码", list_out.contains(&kid2) && !list_out.contains("Real-Secret-981!"), &list_out);
+    let out = cli(&proj, &["set", "订单库"], None);
+    let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    check(
+        &mut c,
+        "同名条目被拒绝并指路 rotate",
+        !out.status.success() && all.contains("已存在") && all.contains("rotate"),
+        &all,
+    );
 
     // ── [4] 信任流程 + run 注入 ──
     println!("\n[4] 信任流程 + run 注入");

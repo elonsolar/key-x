@@ -149,7 +149,7 @@ pub fn status_for(code: &'static str) -> u16 {
     match code {
         "WRONG_PASSWORD" => 401,
         "LOCKED" | "KEYCHAIN_MISSING" => 423,
-        "KEYCHAIN_OCCUPIED" | "EXISTS" => 409,
+        "KEYCHAIN_OCCUPIED" | "EXISTS" | "NAME_EXISTS" => 409,
         "NO_VAULT" | "NOT_FOUND" => 404,
         "VAULT_CORRUPT" => 422,
         _ => 400,
@@ -311,6 +311,17 @@ fn entries_post(state: &State, body: &Value) -> Result<(u16, Value), VaultError>
                 .data["entries"]
                 .as_array_mut()
                 .ok_or_else(|| VaultError::new("VAULT_CORRUPT", "密库内部结构异常"))?;
+            if let Some(new_name) = body.get("name").and_then(|n| n.as_str()) {
+                if entries
+                    .iter()
+                    .any(|e| e["id"].as_str() != Some(kid.as_str()) && e["name"].as_str() == Some(new_name))
+                {
+                    return Err(VaultError::new(
+                        "NAME_EXISTS",
+                        format!("名称「{new_name}」已被其他条目使用"),
+                    ));
+                }
+            }
             let entry = entries
                 .iter_mut()
                 .find(|e| e["id"].as_str() == Some(kid.as_str()))
@@ -335,6 +346,14 @@ fn entries_post(state: &State, body: &Value) -> Result<(u16, Value), VaultError>
                 .data["entries"]
                 .as_array_mut()
                 .ok_or_else(|| VaultError::new("VAULT_CORRUPT", "密库内部结构异常"))?;
+            // 名称唯一：同名拒绝并指路（peek/rotate 按名操作才无歧义）
+            if let Some(e) = entries.iter().find(|e| e["name"].as_str() == Some(name.as_str())) {
+                let kid = e["id"].as_str().unwrap_or("");
+                return Err(VaultError::new(
+                    "NAME_EXISTS",
+                    format!("名称「{name}」已存在（{kid}）。要换密码用 keyx rotate {kid}；要存不同的密码请换个名字。"),
+                ));
+            }
             let existing: HashSet<String> =
                 entries.iter().filter_map(|e| e["id"].as_str().map(String::from)).collect();
             let new_kid = new_key_id(&existing);
