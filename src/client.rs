@@ -42,7 +42,8 @@ pub fn api(method: &str, path: &str, body: Option<&Value>, timeout: Duration) ->
             if let Some(t) = &token {
                 r = r.set("X-KeyX-Auth", t);
             }
-            r.call()
+            let payload = body.cloned().unwrap_or_else(|| json!({}));
+            r.send_string(&payload.to_string())
         }
         _ => {
             let mut r = ureq::post(&url).timeout(timeout);
