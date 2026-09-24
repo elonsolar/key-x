@@ -82,7 +82,18 @@ pub fn api_or_die(method: &str, path: &str, body: Option<&Value>, timeout: Durat
 pub fn ensure_daemon() {
     ensure_home();
     match api("GET", "/status", None, Duration::from_secs(1)) {
-        Ok(_) => return,
+        Ok(st) => {
+            // daemon 是常驻进程，升级二进制后旧 daemon 会带着旧逻辑继续跑（尤其 peek），
+            // 版本不一致就提醒重启，否则用户以为升级没生效
+            let dv = st.get("version").and_then(|v| v.as_str()).unwrap_or("");
+            if !dv.is_empty() && dv != VERSION {
+                eprintln!(
+                    "提示：daemon 还是 v{}（当前 CLI v{}），旧进程缺少新功能。请运行 keyx stop，下次命令会自动拉起新 daemon。",
+                    dv, VERSION
+                );
+            }
+            return;
+        }
         Err(e) if e.status == 403 => {
             eprintln!(
                 "端口上的 daemon 与本机密库不匹配（client token 校验失败）。\n可能上次异常退出留下了旧 daemon：运行 `keyx stop`，或用 KEYX_PORT 换端口。"

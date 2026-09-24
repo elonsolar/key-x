@@ -405,6 +405,8 @@ fn resolve(state: &State, body: &Value) -> Result<(u16, Value), VaultError> {
 
 fn peek_route(state: &State, body: &Value) -> Result<(u16, Value), VaultError> {
     let kid = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // headless 终端确认：client 已在真终端（TTY）拿到人工按键才带此标志，明文只进剪贴板不进 stdout
+    let confirmed = body.get("confirm").and_then(|v| v.as_str()) == Some("copy");
     let (name, password) = state.with(|v| {
         let e = v
             .data["entries"]
@@ -422,12 +424,22 @@ fn peek_route(state: &State, body: &Value) -> Result<(u16, Value), VaultError> {
         return Ok((200, json!({ "ok": true, "method": "test" })));
     }
     let name = if name.is_empty() { kid.clone() } else { name };
-    match peek::peek_popup(&name, &password) {
+    let method = if confirmed {
+        if peek::copy_clipboard(&password) {
+            peek::schedule_clear(password.clone());
+            Some("clipboard")
+        } else {
+            None
+        }
+    } else {
+        peek::peek_popup(&name, &password)
+    };
+    match method {
         None => {
             audit("PEEK", json!({ "key": kid, "method": "no_gui" }));
             Err(VaultError::new(
                 "PEEK_NO_GUI",
-                "此操作需要图形界面（弹窗人工确认），请在有桌面环境的机器上运行",
+                "此操作需要人工确认：无桌面环境（SSH/无头服务器）或缺少弹窗组件（Linux 需 zenity/kdialog）。请在人工终端重跑 keyx peek，按提示回车确认（仅复制模式）",
             ))
         }
         Some("cancelled") => {
@@ -435,7 +447,8 @@ fn peek_route(state: &State, body: &Value) -> Result<(u16, Value), VaultError> {
             Ok((200, json!({ "ok": false, "method": "cancelled" })))
         }
         Some(m) => {
-            audit("PEEK", json!({ "key": kid, "method": m }));
+            // 终端确认和弹窗确认在审计里区分开
+            audit("PEEK", json!({ "key": kid, "method": if confirmed { "tty_confirm" } else { m } }));
             Ok((200, json!({ "ok": true, "method": m })))
         }
     }

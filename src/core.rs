@@ -12,7 +12,7 @@ use rand::RngCore;
 use serde_json::{json, Value};
 use sha2::Sha256;
 
-pub const VERSION: &str = "1.3.0";
+pub const VERSION: &str = "1.4.0";
 pub const MODE_KEYCHAIN: &str = "KEYCHAIN";
 pub const MODE_PASSWORD: &str = "PBKDF2-SHA256";
 pub const KEYCHAIN_SERVICE: &str = "keyx";

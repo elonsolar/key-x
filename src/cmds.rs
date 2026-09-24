@@ -1,7 +1,7 @@
 // CLI 命令实现。输出文本是对外契约——测试按文本断言，改动需同步测试
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -113,15 +113,30 @@ pub fn cmd_peek(key: &str) {
     }
     let id = matches[0]["id"].as_str().unwrap_or("").to_string();
     let name = matches[0]["name"].as_str().unwrap_or("").to_string();
+    let name = if name.is_empty() { id.clone() } else { name };
     // 弹窗等人工点击，超时给足 600s + 余量
     let r = match api("POST", "/peek", Some(&json!({ "id": id })), Duration::from_secs(660)) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
+            // 无 GUI（SSH/无头服务器）且面前有真终端 → 终端确认（仅复制模式）重试；AI/脚本（非 TTY）维持拒绝
+            let no_gui = e.obj.get("error").and_then(|v| v.as_str()) == Some("PEEK_NO_GUI");
+            if !no_gui || !std::io::stdin().is_terminal() {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+            if !peek_tty_confirm(&name) {
+                println!("已取消。");
+                return;
+            }
+            match api("POST", "/peek", Some(&json!({ "id": id, "confirm": "copy" })), Duration::from_secs(60)) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     };
-    let name = if name.is_empty() { id } else { name };
     if !r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
         println!("已取消。");
         return;
@@ -131,6 +146,19 @@ pub fn cmd_peek(key: &str) {
         Some("show") => println!("已在弹窗中显示「{}」。", name),
         _ => println!("已确认。"),
     }
+}
+
+/// headless 终端确认：替代弹窗的人工确认。明文不上屏（仅复制模式），非回车一律当取消
+fn peek_tty_confirm(name: &str) -> bool {
+    use std::io::BufRead;
+    println!(
+        "当前无图形界面，改用终端确认。把「{}」的密码复制到剪贴板（{} 秒后自动清空）。",
+        name, CLIPBOARD_CLEAR_SEC
+    );
+    println!("回车 = 复制，q = 取消：");
+    let mut line = String::new();
+    // EOF（连接断开）按取消处理
+    std::io::stdin().lock().read_line(&mut line).unwrap_or(0) > 0 && line.trim().is_empty()
 }
 
 pub fn cmd_rotate(key_id: &str, username: Option<&str>) {
