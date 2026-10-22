@@ -26,7 +26,8 @@ url="https://github.com/${REPO}/releases/${VERSION}/download/${asset}"
 echo "下载 ${url}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fL "$url" -o "$tmp/keyx.tar.gz"
+# 弱网下 GitHub 连接会间歇失败/挂起：限时 + 重试，与 keyx update 的策略一致
+curl -fL --connect-timeout 10 --max-time 300 --retry 3 "$url" -o "$tmp/keyx.tar.gz"
 tar -xzf "$tmp/keyx.tar.gz" -C "$tmp"
 
 mkdir -p "$INSTALL_DIR"
