@@ -34,13 +34,18 @@ impl State {
     fn touch(&self) {
         *self.last_used.lock().unwrap() = std::time::Instant::now();
     }
-    /// 自动锁检查 + 取出解锁态执行操作。锁内不做慢操作（peek 先取出值再弹窗）。
-    pub fn with<T>(&self, f: impl FnOnce(&mut Unlocked) -> Result<T, VaultError>) -> Result<T, VaultError> {
-        let mut g = self.unlocked.lock().unwrap();
+    /// 惰性自动锁定：超时清空密钥。所有读解锁状态的地方（with/status）都必须先走这里，
+    /// 否则 /status 会报过期的 unlocked=true，keyx unlock 误判"已解锁"而实际已锁定
+    fn autolock_if_due(&self, g: &mut Option<Unlocked>) {
         if g.is_some() && self.lock_minutes > 0 && self.last_used.lock().unwrap().elapsed() > Duration::from_secs(self.lock_minutes * 60) {
             *g = None;
             audit("LOCK", json!({ "reason": "autolock", "idle_min": self.lock_minutes }));
         }
+    }
+    /// 自动锁检查 + 取出解锁态执行操作。锁内不做慢操作（peek 先取出值再弹窗）。
+    pub fn with<T>(&self, f: impl FnOnce(&mut Unlocked) -> Result<T, VaultError>) -> Result<T, VaultError> {
+        let mut g = self.unlocked.lock().unwrap();
+        self.autolock_if_due(&mut g);
         match g.as_mut() {
             None => Err(VaultError::new("LOCKED", "daemon 处于锁定状态，请先 keyx unlock")),
             Some(v) => {
@@ -157,7 +162,8 @@ pub fn status_for(code: &'static str) -> u16 {
 }
 
 fn status_obj(state: &State) -> Value {
-    let g = state.unlocked.lock().unwrap();
+    let mut g = state.unlocked.lock().unwrap();
+    state.autolock_if_due(&mut g);
     let unlocked = g.is_some();
     let entries = g.as_ref().map(|v| v.data["entries"].as_array().map(|a| a.len()).unwrap_or(0));
     let kdf = g

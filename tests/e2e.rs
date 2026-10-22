@@ -1,6 +1,6 @@
-//! Key-X Rust 版端到端测试（43 项断言）。
+//! Key-X Rust 版端到端测试（49 项断言）。
 //! 覆盖：token 鉴权、创建/解锁/错误密码、密文落盘、set/list、信任流程、run 注入、
-//!       scope 隔离、锁定/审计、导出导入、防篡改、解析链、peek、stop、钥匙串模式。
+//!       scope 隔离、锁定/审计/自动锁定、导出导入、防篡改、解析链、peek、stop、钥匙串模式。
 
 use serde_json::{json, Value};
 use std::io::Write;
@@ -22,7 +22,11 @@ fn check(c: &mut Counts, name: &str, cond: bool, extra: &str) {
 }
 
 fn http(token: &str, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
-    let url = format!("http://127.0.0.1:{}{}", PORT, path);
+    http_at(PORT, token, method, path, body)
+}
+
+fn http_at(port: u16, token: &str, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+    let url = format!("http://127.0.0.1:{}{}", port, path);
     let sent = match (method, body) {
         ("GET", _) => ureq::get(&url).timeout(Duration::from_secs(5)).set("X-KeyX-Auth", token).call(),
         ("DELETE", b) => ureq::delete(&url)
@@ -215,6 +219,60 @@ fn e2e() {
     let audit = std::fs::read_to_string(home.join("audit.log")).unwrap_or_default();
     check(&mut c, "审计含 RESOLVE", audit.contains("\"event\": \"RESOLVE\"") || audit.contains("\"event\":\"RESOLVE\""), "");
     check(&mut c, "审计含 DENY(未信任)", audit.contains("not_trusted"), "");
+
+    // ── [6b] 自动锁定：/status 如实报告，keyx unlock 真正解锁 ──
+    // 回归：/status 曾直接读内存标志不做超时检查，闲置到期后仍报 unlocked=true，
+    // 导致 keyx unlock 什么都不做就打印"已解锁"，下一条命令才发现已锁定
+    println!("\n[6b] 自动锁定：闲置到期后 /status 报已锁定，unlock 重新解锁");
+    {
+        let h2 = tmp.join("home-al");
+        std::fs::create_dir_all(&h2).unwrap();
+        let mut d2 = Command::new(bin);
+        d2.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
+        for (k, v) in &base {
+            d2.env(k, v);
+        }
+        d2.env("KEYX_HOME", &h2).env("KEYX_PORT", "7405").env("KEYX_AUTOLOCK_MIN", "1");
+        let mut d2 = d2.spawn().expect("spawn autolock daemon");
+        let mut t2 = String::new();
+        let tp = h2.join("client.token");
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(100));
+            if let Ok(t) = std::fs::read_to_string(&tp) {
+                let t = t.trim().to_string();
+                if t.len() >= 32 && http_at(7405, &t, "GET", "/status", None).0 == 200 {
+                    t2 = t;
+                    break;
+                }
+            }
+        }
+        if t2.is_empty() {
+            let _ = d2.kill();
+            panic!("autolock daemon 未启动");
+        }
+        let _ = http_at(7405, &t2, "POST", "/create", Some(json!({ "password": "test-master-2026!" })));
+        let (st, _) = http_at(7405, &t2, "POST", "/unlock", Some(json!({ "password": "test-master-2026!" })));
+        check(&mut c, "autolock 用例 daemon 解锁", st == 200, &format!("st={}", st));
+        std::thread::sleep(Duration::from_secs(65));
+        let (st, r) = http_at(7405, &t2, "GET", "/status", None);
+        check(&mut c, "闲置到期后 /status 报已锁定", st == 200 && r["unlocked"] == false, &format!("{} {}", st, r));
+        let audit = std::fs::read_to_string(h2.join("audit.log")).unwrap_or_default();
+        check(&mut c, "审计含 autolock 锁定记录", audit.contains("autolock"), "");
+        // 此处 unlock 必须走真正的解锁路径，而不是被过期状态骗过直接打印"已解锁"
+        let mut ucmd = Command::new(bin);
+        ucmd.arg("unlock").current_dir(&proj).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
+        for (k, v) in &base {
+            ucmd.env(k, v);
+        }
+        ucmd.env("KEYX_HOME", &h2).env("KEYX_PORT", "7405").env("KEYX_AUTOLOCK_MIN", "1");
+        let out = ucmd.output().expect("run unlock");
+        let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        check(&mut c, "unlock 重新解锁成功", out.status.success() && all.contains("已解锁"), &all);
+        let (_, r) = http_at(7405, &t2, "GET", "/status", None);
+        check(&mut c, "unlock 后确为解锁态", r["unlocked"] == true, &format!("{}", r));
+        let _ = d2.kill();
+        let _ = d2.wait();
+    }
 
     // ── [7] 导出 / 导入 ──
     println!("\n[7] 导出 / 导入（浏览器备份格式互通）");
