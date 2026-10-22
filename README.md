@@ -36,6 +36,18 @@ curl -fsSL https://raw.githubusercontent.com/elonsolar/key-x/main/install.sh | b
 irm  https://raw.githubusercontent.com/elonsolar/key-x/main/install.ps1 | iex          # Windows
 ```
 
+## 更新
+
+daemon 每 6 小时在后台查一次 GitHub Releases，发现有新版时每条命令会提示一行。
+升级只需一条命令（下载对应平台资产、校验版本后原地覆盖，并自动重启 daemon）：
+
+```bash
+keyx update            # 升级到最新版
+keyx update --check    # 只检查，不升级
+```
+
+不想联网检查：`KEYX_NO_UPDATE_CHECK=1`（环境变量，daemon 启动时读取）。
+
 ## 配套技能
 
 本工具的使用准则由 AI 技能承载——**怎么装、什么场景自动触发、老项目怎么排查泄漏、新项目 AI 会怎么做，见 [key-x-skill](https://github.com/elonsolar/key-x-skill)**：

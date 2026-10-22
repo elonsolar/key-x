@@ -4,6 +4,7 @@ mod cmds;
 mod core;
 mod daemon;
 mod peek;
+mod update;
 
 use std::process::exit;
 
@@ -23,6 +24,7 @@ fn usage() -> ! {
   keyx trust list | add <编号>... [--project 目录] | rm [--project 目录]
   keyx audit [-n N]                      审计留痕
   keyx status | lock | unlock | stop     daemon 生命周期
+  keyx update [--check]                 自更新（--check 只检查不升级；日常自动检测到新版会提示）
   keyx export [-o 文件] [--include-key]   导出加密备份
   keyx import <文件> [--force]            导入备份（覆盖本地）
   keyx keychain-reset                    清除钥匙串主密钥",
@@ -194,6 +196,7 @@ fn main() {
             }
         }
         "keychain-reset" => cmds::cmd_keychain_reset(),
+        "update" => update::cmd_update(rest.first().map(String::as_str) == Some("--check")),
         _ => usage(),
     }
 }

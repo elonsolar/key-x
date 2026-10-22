@@ -21,6 +21,8 @@ pub struct State {
     pub unlocked: Mutex<Option<Unlocked>>,
     pub last_used: Mutex<std::time::Instant>,
     pub lock_minutes: u64,
+    /// 后台版本检查到的最新 Release tag（如 "v1.5.1"）；None = 尚未查到/已关闭检查
+    pub latest: Mutex<Option<String>>,
 }
 
 impl State {
@@ -29,6 +31,7 @@ impl State {
             unlocked: Mutex::new(None),
             last_used: Mutex::new(std::time::Instant::now()),
             lock_minutes: lock_minutes(),
+            latest: Mutex::new(None),
         }
     }
     fn touch(&self) {
@@ -107,6 +110,20 @@ pub fn serve() -> ! {
 
     let server = Arc::new(Server::http(("127.0.0.1", port())).expect("bind 127.0.0.1"));
     let state = Arc::new(State::new());
+    // 后台版本检查：daemon 常驻适合做这件事，CLI 每条命令零额外等待；
+    // 查到新版只经 /status 透传给 CLI 提示，不自动下载安装
+    if !crate::update::update_check_disabled() {
+        let st = state.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(5));
+            if let Ok((tag, _)) = crate::update::latest_release() {
+                if let Ok(mut l) = st.latest.lock() {
+                    *l = Some(tag);
+                }
+            }
+            std::thread::sleep(Duration::from_secs(6 * 3600));
+        });
+    }
     for _ in 0..8 {
         let server = server.clone();
         let state = state.clone();
@@ -176,7 +193,13 @@ fn status_obj(state: &State) -> Value {
         Some(MODE_PASSWORD) => Some("password"),
         _ => None,
     };
-    json!({ "unlocked": unlocked, "entries": entries, "mode": mode, "autolock_min": state.lock_minutes, "version": VERSION })
+    let latest = state.latest.lock().ok().and_then(|l| l.clone());
+    let mut obj = json!({ "unlocked": unlocked, "entries": entries, "mode": mode, "autolock_min": state.lock_minutes, "version": VERSION });
+    // 只在有新版时携带，避免本地构建版本超前于 Release 时 CLI 误提示
+    if let Some(tag) = latest.filter(|t| crate::update::is_newer(t, VERSION)) {
+        obj["latest"] = json!(tag);
+    }
+    obj
 }
 
 fn route(state: &State, method: &str, path: &str, url: &str, body: &Value) -> Result<(u16, Value), VaultError> {

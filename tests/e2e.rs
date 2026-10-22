@@ -1,6 +1,7 @@
-//! Key-X Rust 版端到端测试（49 项断言）。
+//! Key-X Rust 版端到端测试（50 项断言）。
 //! 覆盖：token 鉴权、创建/解锁/错误密码、密文落盘、set/list、信任流程、run 注入、
-//!       scope 隔离、锁定/审计/自动锁定、导出导入、防篡改、解析链、peek、stop、钥匙串模式。
+//!       scope 隔离、锁定/审计/自动锁定、导出导入、防篡改、解析链、peek、stop、
+//!       钥匙串模式、自更新检查。
 
 use serde_json::{json, Value};
 use std::io::Write;
@@ -70,6 +71,8 @@ fn e2e() {
         ("KEYX_AUTOLOCK_MIN".into(), "30".into()),
         ("KEYX_ITERATIONS".into(), "1000".into()),
         ("KEYX_PEEK_TEST".into(), "1".into()),
+        // 后台版本检查会真连 GitHub：测试要确定性，[15] 用例单独打开
+        ("KEYX_NO_UPDATE_CHECK".into(), "1".into()),
     ];
 
     let cli = |cwd: &std::path::Path, args: &[&str], input: Option<&str>| -> Output {
@@ -477,6 +480,22 @@ fn e2e() {
         }
         let _ = kcli(&["keychain-reset"], None); // 经二进制清理本次条目
         let _ = kcli(&["stop"], None);
+    }
+
+    // ── [15] 自更新检查（真连 GitHub；离线时优雅报错也算过）──
+    println!("\n[15] keyx update --check");
+    {
+        let mut ucmd = Command::new(bin);
+        ucmd.args(["update", "--check"]).current_dir(&proj).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
+        for (k, v) in &base {
+            ucmd.env(k, v);
+        }
+        ucmd.env_remove("KEYX_NO_UPDATE_CHECK");
+        let out = ucmd.output().expect("run update --check");
+        let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let ok = (out.status.success() && (all.contains("已是最新") || all.contains("有新版")))
+            || (!out.status.success() && all.contains("检查更新失败"));
+        check(&mut c, "update --check 检查新版（或离线优雅报错）", ok, &all);
     }
 
     // ── 清理 ──

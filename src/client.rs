@@ -92,6 +92,10 @@ pub fn ensure_daemon() {
                     dv, VERSION
                 );
             }
+            // daemon 后台检查到新 Release 时透传提示（KEYX_NO_UPDATE_CHECK=1 可关闭检查）
+            if let Some(latest) = st.get("latest").and_then(|v| v.as_str()) {
+                eprintln!("有新版 {}（当前 v{}）。运行 keyx update 升级。", latest, VERSION);
+            }
             return;
         }
         Err(e) if e.status == 403 => {
