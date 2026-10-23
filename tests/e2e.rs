@@ -1,4 +1,4 @@
-//! Key-X Rust 版端到端测试（50 项断言）。
+//! Key-X Rust 版端到端测试（51 项断言）。
 //! 覆盖：token 鉴权、创建/解锁/错误密码、密文落盘、set/list、信任流程、run 注入、
 //!       scope 隔离、锁定/审计/自动锁定、导出导入、防篡改、解析链、peek、stop、
 //!       钥匙串模式、自更新检查。
@@ -68,10 +68,10 @@ fn e2e() {
         ("KEYX_PORT".into(), PORT.to_string()),
         ("KEYX_PASSWORD".into(), "test-master-2026!".into()),
         ("KEYX_MODE".into(), "password".into()),
-        ("KEYX_AUTOLOCK_MIN".into(), "30".into()),
         ("KEYX_ITERATIONS".into(), "1000".into()),
         ("KEYX_PEEK_TEST".into(), "1".into()),
-        // 后台版本检查会真连 GitHub：测试要确定性，[15] 用例单独打开
+        // 自动锁定走新默认 120 分钟（测试全程远小于）；后台版本检查会真连
+        // GitHub：测试要确定性，[15] 用例单独打开
         ("KEYX_NO_UPDATE_CHECK".into(), "1".into()),
     ];
 
@@ -135,6 +135,8 @@ fn e2e() {
     check(&mut c, "错误主密码 401", st == 401 && r["error"] == "WRONG_PASSWORD", &format!("{} {}", st, r));
     let (st, _) = http(&token, "POST", "/unlock", Some(json!({ "password": "test-master-2026!" })));
     check(&mut c, "正确主密码解锁", st == 200, &format!("st={}", st));
+    let (st, r) = http(&token, "GET", "/status", None);
+    check(&mut c, "自动锁定默认 120 分钟", st == 200 && r["autolock_min"] == 120, &format!("{} {}", st, r));
 
     // ── [3] 存入 → key-id → 磁盘密文 ──
     println!("\n[3] 存入 → key-id → 磁盘密文");

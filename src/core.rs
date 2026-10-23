@@ -12,12 +12,12 @@ use rand::RngCore;
 use serde_json::{json, Value};
 use sha2::Sha256;
 
-pub const VERSION: &str = "1.5.0";
+pub const VERSION: &str = "1.6.0";
 pub const MODE_KEYCHAIN: &str = "KEYCHAIN";
 pub const MODE_PASSWORD: &str = "PBKDF2-SHA256";
 pub const KEYCHAIN_SERVICE: &str = "keyx";
 pub const DEFAULT_ITER: u32 = 600_000;
-pub const DEFAULT_LOCK_MIN: u64 = 30;
+pub const DEFAULT_LOCK_MIN: u64 = 120;
 pub const DEFAULT_PORT: u16 = 7361;
 
 // ───────────────────────── 路径与常量 ─────────────────────────

@@ -114,13 +114,14 @@ fn http_download(url: &str, dest: &PathBuf) -> Result<(), String> {
 }
 
 /// 就地替换正在运行的二进制：unix 先拷到同目录再 rename 覆盖（原子）；
-/// Windows 不能覆盖运行中的 exe，改名旧的再放新的
+/// Windows 不能覆盖运行中的 exe，改名旧的再放新的。
+/// staged 名带 pid：手动 update 与 daemon 自动升级并发时互不踩踏
 fn replace_binary(new_bin: &PathBuf) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("{}", e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let staged = exe.with_extension("keyx.new");
+        let staged = exe.with_extension(format!("keyx.new.{}", std::process::id()));
         std::fs::copy(new_bin, &staged).map_err(|e| format!("写入 {} 失败：{}", staged.display(), e))?;
         std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("{}", e))?;
         std::fs::rename(&staged, &exe).map_err(|e| {
@@ -132,10 +133,52 @@ fn replace_binary(new_bin: &PathBuf) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        let old = exe.with_extension("exe.old");
+        let old = exe.with_extension(format!("exe.{}.old", std::process::id()));
         let _ = std::fs::rename(&exe, &old);
         std::fs::copy(new_bin, &exe).map_err(|e| format!("覆盖 {} 失败：{}", exe.display(), e))
     }
+}
+
+/// 下载 → 解压 → 校验 → 原地替换二进制。成功即已替换；daemon 侧的调用方
+/// 负责退出进程，CLI 侧负责停/拉 daemon
+pub fn perform_update(tag: &str, assets: &[(String, String)]) -> Result<(), String> {
+    let asset = match target_asset().and_then(|want| assets.iter().find(|(n, _)| *n == want).cloned()) {
+        Some((_, url)) => url,
+        None => {
+            let want = target_asset().unwrap_or_default();
+            return Err(format!("Release {} 缺少本平台资产 {}（改名需与 release.yml 同步）", tag, want));
+        }
+    };
+    let dl = home_dir().join("download");
+    let _ = std::fs::create_dir_all(&dl);
+    // Windows Expand-Archive 依赖 .zip 后缀识别格式，命名必须带真实扩展名
+    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let archive = dl.join(format!("keyx-{}.{}", strip_v(tag), ext));
+    println!("下载 {} …", asset);
+    http_download(&asset, &archive).map_err(|e| format!("下载失败：{}", e))?;
+    let out = dl.join(format!("keyx-{}", strip_v(tag)));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}", e))?;
+    // 解压调用系统工具，与 install.sh / release.yml 的打包方式对齐
+    #[cfg(unix)]
+    let unpack = std::process::Command::new("tar").args(["-xzf", &archive.to_string_lossy(), "-C", &out.to_string_lossy()]).status();
+    #[cfg(windows)]
+    let unpack = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &format!("Expand-Archive -Path '{}' -DestinationPath '{}' -Force", archive.to_string_lossy(), out.to_string_lossy())])
+        .status();
+    match unpack {
+        Ok(s) if s.success() => {}
+        other => return Err(format!("解压失败：{:?}", other)),
+    }
+    let bin_name = if cfg!(windows) { "keyx.exe" } else { "keyx" };
+    let new_bin = out.join(bin_name);
+    // 替换前先验证下载到的二进制能跑、且版本与 Release 一致，防止坏资产/半截下载
+    let ver = std::process::Command::new(&new_bin).arg("--version").output();
+    match ver {
+        Ok(o) if o.status.success() && String::from_utf8_lossy(&o.stdout).contains(strip_v(tag)) => {}
+        other => return Err(format!("下载的二进制校验不通过（版本不符或无法运行）：{:?}", other.map(|o| o.status))),
+    }
+    replace_binary(&new_bin)
 }
 
 pub fn cmd_update(check_only: bool) {
@@ -154,53 +197,7 @@ pub fn cmd_update(check_only: bool) {
         println!("有新版 {}（当前 v{}）。运行 keyx update 升级。", tag, VERSION);
         return;
     }
-    let asset = match target_asset().and_then(|want| assets.iter().find(|(n, _)| *n == want).cloned()) {
-        Some((_, url)) => (url),
-        None => {
-            let want = target_asset().unwrap_or_default();
-            eprintln!("Release {} 缺少本平台资产 {}（改名需与 release.yml 同步）", tag, want);
-            std::process::exit(1);
-        }
-    };
-    let dl = home_dir().join("download");
-    let _ = std::fs::create_dir_all(&dl);
-    // Windows Expand-Archive 依赖 .zip 后缀识别格式，命名必须带真实扩展名
-    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
-    let archive = dl.join(format!("keyx-{}.{}", strip_v(&tag), ext));
-    println!("下载 {} …", asset);
-    if let Err(e) = http_download(&asset, &archive) {
-        eprintln!("下载失败：{}", e);
-        std::process::exit(1);
-    }
-    let out = dl.join(format!("keyx-{}", strip_v(&tag)));
-    let _ = std::fs::remove_dir_all(&out);
-    std::fs::create_dir_all(&out).unwrap();
-    // 解压调用系统工具，与 install.sh / release.yml 的打包方式对齐
-    #[cfg(unix)]
-    let unpack = std::process::Command::new("tar").args(["-xzf", &archive.to_string_lossy(), "-C", &out.to_string_lossy()]).status();
-    #[cfg(windows)]
-    let unpack = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &format!("Expand-Archive -Path '{}' -DestinationPath '{}' -Force", archive.to_string_lossy(), out.to_string_lossy())])
-        .status();
-    match unpack {
-        Ok(s) if s.success() => {}
-        other => {
-            eprintln!("解压失败：{:?}", other);
-            std::process::exit(1);
-        }
-    }
-    let bin_name = if cfg!(windows) { "keyx.exe" } else { "keyx" };
-    let new_bin = out.join(bin_name);
-    // 替换前先验证下载到的二进制能跑、且版本与 Release 一致，防止坏资产/半截下载
-    let ver = std::process::Command::new(&new_bin).arg("--version").output();
-    match ver {
-        Ok(o) if o.status.success() && String::from_utf8_lossy(&o.stdout).contains(strip_v(&tag)) => {}
-        other => {
-            eprintln!("下载的二进制校验不通过（版本不符或无法运行）：{:?}", other.map(|o| o.status));
-            std::process::exit(1);
-        }
-    }
-    if let Err(e) = replace_binary(&new_bin) {
+    if let Err(e) = perform_update(&tag, &assets) {
         eprintln!("{}", e);
         std::process::exit(1);
     }

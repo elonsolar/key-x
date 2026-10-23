@@ -110,15 +110,28 @@ pub fn serve() -> ! {
 
     let server = Arc::new(Server::http(("127.0.0.1", port())).expect("bind 127.0.0.1"));
     let state = Arc::new(State::new());
-    // 后台版本检查：daemon 常驻适合做这件事，CLI 每条命令零额外等待；
-    // 查到新版只经 /status 透传给 CLI 提示，不自动下载安装
+    // 后台版本检查 + 锁定态自动升级：daemon 常驻适合做这件事，CLI 每条命令零额外等待。
+    // 只在锁定态升级——密钥不在内存、没有进行中的密库操作，重启零代价；
+    // 解锁态（可能正在用）只经 /status 透传提示，交给人跑 keyx update
     if !crate::update::update_check_disabled() {
         let st = state.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(5));
-            if let Ok((tag, _)) = crate::update::latest_release() {
+            if let Ok((tag, assets)) = crate::update::latest_release() {
                 if let Ok(mut l) = st.latest.lock() {
-                    *l = Some(tag);
+                    *l = Some(tag.clone());
+                }
+                let locked = st.unlocked.lock().map(|g| g.is_none()).unwrap_or(false);
+                if crate::update::is_newer(&tag, VERSION) && locked {
+                    match crate::update::perform_update(&tag, &assets) {
+                        Ok(()) => {
+                            audit("AUTO_UPDATE", json!({ "from": VERSION, "to": tag }));
+                            let _ = fs::remove_file(pid_file());
+                            eprintln!("已自动升级到 {}，daemon 退出；下一条命令自动拉起新版。", tag);
+                            std::process::exit(0);
+                        }
+                        Err(e) => eprintln!("自动升级失败（6 小时后重试）：{}", e),
+                    }
                 }
             }
             std::thread::sleep(Duration::from_secs(6 * 3600));

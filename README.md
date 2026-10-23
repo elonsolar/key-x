@@ -38,15 +38,17 @@ irm  https://raw.githubusercontent.com/elonsolar/key-x/main/install.ps1 | iex   
 
 ## 更新
 
-daemon 每 6 小时在后台查一次 GitHub Releases，发现有新版时每条命令会提示一行。
-升级只需一条命令（下载对应平台资产、校验版本后原地覆盖，并自动重启 daemon）：
+自动升级，无需任何操作：daemon 每 6 小时查一次 GitHub Releases，发现新版且
+密库处于锁定态（无密钥在内存）时自动下载、校验、替换二进制并重启。解锁态下
+不打断使用，只提示一行，此时可手动升级：
 
 ```bash
-keyx update            # 升级到最新版
+keyx update            # 立即升级到最新版
 keyx update --check    # 只检查，不升级
 ```
 
-不想联网检查：`KEYX_NO_UPDATE_CHECK=1`（环境变量，daemon 启动时读取）。
+不想联网检查/自动升级：`KEYX_NO_UPDATE_CHECK=1`（环境变量，daemon 启动时读取）。
+自动锁定默认闲置 2 小时（`KEYX_AUTOLOCK_MIN` 可覆盖）。
 
 ## 配套技能
 
